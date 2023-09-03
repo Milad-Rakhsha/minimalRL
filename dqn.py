@@ -21,9 +21,10 @@ class ReplayBuffer():
         self.buffer.append(transition)
     
     def sample(self, n):
+        # sample n transition from the buffer
         mini_batch = random.sample(self.buffer, n)
         s_lst, a_lst, r_lst, s_prime_lst, done_mask_lst = [], [], [], [], []
-        
+        # vectorize the mini batch and form s, a, r, s', done tensors
         for transition in mini_batch:
             s, a, r, s_prime, done_mask = transition
             s_lst.append(s)
@@ -39,6 +40,7 @@ class ReplayBuffer():
     def size(self):
         return len(self.buffer)
 
+# NN gets an input of size 4 output 2 action values (value of going left or right)
 class Qnet(nn.Module):
     def __init__(self):
         super(Qnet, self).__init__()
@@ -51,28 +53,40 @@ class Qnet(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-      
+    
+    # make an epsilon greedy action based on the observation
     def sample_action(self, obs, epsilon):
         out = self.forward(obs)
         coin = random.random()
         if coin < epsilon:
+            # pick either first or second action randomly
             return random.randint(0,1)
         else : 
+            # pick the q_a value with maximum value
             return out.argmax().item()
             
 def train(q, q_target, memory, optimizer):
+    # do a gradient descent with batch sizes 10 times
     for i in range(10):
+        # Sample a batch size and create tensors
         s,a,r,s_prime,done_mask = memory.sample(batch_size)
-
+        # Predicted q_a values based on the q network
         q_out = q(s)
+        # based on the discrete action a (0 or 1) gather all the q_a values from the first dimension [[q_1, q_2], [q_1, q2], ...]
+        # q_a is the predicted values based on the current network
         q_a = q_out.gather(1,a)
+        # target network (network we want to train not the one we use for behavior)
+        # in Q learning the target network should approximate q_target based on the maximum q_a|s' 
         max_q_prime = q_target(s_prime).max(1)[0].unsqueeze(1)
         target = r + gamma * max_q_prime * done_mask
+        # note that loss term here include both target q network weights and q weights
         loss = F.smooth_l1_loss(q_a, target)
-        
+        # however the optimizer is taking derivatives w.r.t to the q network not target network
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        # Q_target isn't trained, it provides some stability 
+        # the weights are copied from q network after a while via q_target.load_state_dict(q.state_dict())
 
 def main():
     env = gym.make('CartPole-v1')
@@ -91,7 +105,7 @@ def main():
         done = False
 
         while not done:
-            a = q.sample_action(torch.from_numpy(s).float(), epsilon)      
+            a = q.sample_action(torch.from_numpy(s).float(), epsilon)     
             s_prime, r, done, truncated, info = env.step(a)
             done_mask = 0.0 if done else 1.0
             memory.put((s,a,r/100.0,s_prime, done_mask))

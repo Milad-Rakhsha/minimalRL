@@ -14,18 +14,20 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super(ActorCritic, self).__init__()
         self.data = []
-        
+        # share the weights data between the first layer for actor and critic network
         self.fc1 = nn.Linear(4,256)
         self.fc_pi = nn.Linear(256,2)
         self.fc_v = nn.Linear(256,1)
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         
+    # Policy network is a categorical classification with softmax as probability of the two actions 
+    # dim=softmax_dim is for when we input multiple states and want o know the actions for all (vectorized), softmax should be applied to the second dimension)
     def pi(self, x, softmax_dim = 0):
         x = F.relu(self.fc1(x))
         x = self.fc_pi(x)
         prob = F.softmax(x, dim=softmax_dim)
         return prob
-    
+    # just logits provides value function per sate
     def v(self, x):
         x = F.relu(self.fc1(x))
         v = self.fc_v(x)
@@ -33,7 +35,8 @@ class ActorCritic(nn.Module):
     
     def put_data(self, transition):
         self.data.append(transition)
-        
+    
+    # vectorize a batch of inputs
     def make_batch(self):
         s_lst, a_lst, r_lst, s_prime_lst, done_lst = [], [], [], [], []
         for transition in self.data:
@@ -51,15 +54,23 @@ class ActorCritic(nn.Module):
         self.data = []
         return s_batch, a_batch, r_batch, s_prime_batch, done_batch
   
+    # note that the training is done for both actor and critic together
     def train_net(self):
         s, a, r, s_prime, done = self.make_batch()
+        # the td_target according to the next state (s')
         td_target = r + gamma * self.v(s_prime) * done
+        # td error
         delta = td_target - self.v(s)
         
+        # probabilities of taking the current action 
         pi = self.pi(s, softmax_dim=1)
+        # gather action probabilities from the know category of action from all elements in vector from the current actions 
         pi_a = pi.gather(1,a)
+        # don't take gradient from delta (td_error, or advantage function expression), and also td_target expression 
+        # (just take gradient w.r.t policy network and value network coefficients)
         loss = -torch.log(pi_a) * delta.detach() + F.smooth_l1_loss(self.v(s), td_target.detach())
 
+    
         self.optimizer.zero_grad()
         loss.mean().backward()
         self.optimizer.step()         
@@ -74,6 +85,9 @@ def main():
         done = False
         s, _ = env.reset()
         while not done:
+            # note that we don't need to wait until end of episode
+            # we can just do a training step after n_rollout steps 
+            # because we use the TD bootstrapping and not doing MC so don't need to wait for end of episode to compute returns G_t
             for t in range(n_rollout):
                 prob = model.pi(torch.from_numpy(s).float())
                 m = Categorical(prob)

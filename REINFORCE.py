@@ -29,10 +29,15 @@ class Policy(nn.Module):
     def train_net(self):
         R = 0
         self.optimizer.zero_grad()
+        # for each transition in the episode, going from the last transition to the first one
         for r, prob in self.data[::-1]:
+            # compute the return for that state
             R = r + gamma * R
+            # compute the loss with log(prob) * G_t 
             loss = -torch.log(prob) * R
+            # doing backward will accumulate gradients w.r.t. to weights of the loss, i.e. weight of the pob network (NN weight that has grad_fn)
             loss.backward()
+        # do a step is using the gradient to update the weights (parameters() in the above Policy network)
         self.optimizer.step()
         self.data = []
 
