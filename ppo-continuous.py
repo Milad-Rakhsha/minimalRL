@@ -13,7 +13,7 @@ eps_clip        = 0.2
 K_epoch         = 10
 rollout_len    = 3
 buffer_size    = 10
-minibatch_size = 32
+minibatch_size = 32 # size of minibatches of data to use to do a gradient step
 
 class PPO(nn.Module):
     def __init__(self):
@@ -21,6 +21,7 @@ class PPO(nn.Module):
         self.data = []
         
         self.fc1   = nn.Linear(3,128)
+        # note that we share the first layer between all networks but have different layers for v, mu, std network for actions
         self.fc_mu = nn.Linear(128,1)
         self.fc_std  = nn.Linear(128,1)
         self.fc_v = nn.Linear(128,1)
@@ -29,6 +30,7 @@ class PPO(nn.Module):
 
     def pi(self, x, softmax_dim = 0):
         x = F.relu(self.fc1(x))
+        # note that the actor network predicts a gaussian model we can choose to sample continues action from 
         mu = 2.0*torch.tanh(self.fc_mu(x))
         std = F.softplus(self.fc_std(x))
         return mu, std
@@ -40,12 +42,16 @@ class PPO(nn.Module):
       
     def put_data(self, transition):
         self.data.append(transition)
-        
+    
+    # sample from the self.data and 
+
+    # make tensor of size (buffer_size * minibatch_size of rollout_len lists)
     def make_batch(self):
-        s_batch, a_batch, r_batch, s_prime_batch, prob_a_batch, done_batch = [], [], [], [], [], []
         data = []
 
         for j in range(buffer_size):
+            s_batch, a_batch, r_batch, s_prime_batch, prob_a_batch, done_batch = [], [], [], [], [], []
+
             for i in range(minibatch_size):
                 rollout = self.data.pop()
                 s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, done_lst = [], [], [], [], [], []
@@ -67,12 +73,13 @@ class PPO(nn.Module):
                 s_prime_batch.append(s_prime_lst)
                 prob_a_batch.append(prob_a_lst)
                 done_batch.append(done_lst)
-                    
+            
+            # mini_batch sizes are torch.Size([minibatch_size, rollout_len, shape of s or a or r])
             mini_batch = torch.tensor(s_batch, dtype=torch.float), torch.tensor(a_batch, dtype=torch.float), \
                           torch.tensor(r_batch, dtype=torch.float), torch.tensor(s_prime_batch, dtype=torch.float), \
                           torch.tensor(done_batch, dtype=torch.float), torch.tensor(prob_a_batch, dtype=torch.float)
             data.append(mini_batch)
-
+        # data size is list of buffer_size batches of torch.Size([minibatch_size, rollout_len, shape of s or a or r])
         return data
 
     def calc_advantage(self, data):
@@ -132,6 +139,8 @@ def main():
         done = False
         count = 0
         while count < 200 and not done:
+            # again note that we don't wait until the end of episode
+            # for each rollout_len transition we make a batch of data and train 
             for t in range(rollout_len):
                 mu, std = model.pi(torch.from_numpy(s).float())
                 dist = Normal(mu, std)

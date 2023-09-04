@@ -6,11 +6,11 @@ import torch.optim as optim
 from torch.distributions import Categorical
 
 #Hyperparameters
-learning_rate = 0.0005
+learning_rate = 0.0002
 gamma         = 0.98
 lmbda         = 0.95
-eps_clip      = 0.1
-K_epoch       = 3
+eps_clip      = 0.01
+K_epoch       = 10 # number of training steps with gradient descent 
 T_horizon     = 20
 
 class PPO(nn.Module):
@@ -64,6 +64,10 @@ class PPO(nn.Module):
             delta = td_target - self.v(s)
             delta = delta.detach().numpy()
 
+            # Generalized Advantage Estimate
+            # computes how much each action improves the future decisions
+            # use the first step delta as a baseline, going backward from the last transition 
+            # the advantage of each step is the advantage we have had in previous step, discounted by gamma and lambda + the current delta
             advantage_lst = []
             advantage = 0.0
             for delta_t in delta[::-1]:
@@ -74,8 +78,11 @@ class PPO(nn.Module):
 
             pi = self.pi(s, softmax_dim=1)
             pi_a = pi.gather(1,a)
+            # current policy to behavior policy likelihood ratio, we don't want this to exceed some threshold
+            # add the ratio to include the sampling effect from behavior policy but using the target policy for optimization purpose
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
-
+            # policy gradient requires log(prob_a)  * advantage loss to take gradient 
+            # constraint this by eps_clip to make sure the policy doesn't change that much 
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-eps_clip, 1+eps_clip) * advantage
             loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.v(s) , td_target.detach())
@@ -94,6 +101,7 @@ def main():
         s, _ = env.reset()
         done = False
         while not done:
+            # note that we don't wait for the end of episode and do a training every T_horizon (n_rollout) steps
             for t in range(T_horizon):
                 prob = model.pi(torch.from_numpy(s).float())
                 m = Categorical(prob)
